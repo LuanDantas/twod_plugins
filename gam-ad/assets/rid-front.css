@@ -82,13 +82,27 @@
 
 .rid-btns {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 8px;
+  width: 100%;
+}
+
+.rid-btns > .rid-btn {
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .rid-btns {
+    grid-template-columns: 1fr;
+  }
 }
 
 .rid-btn {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   text-align: center;
   text-decoration: none;
   border-radius: 12px;
@@ -97,6 +111,25 @@
   color: #fff;
   background: var(--rid-theme-primary);
   transition: opacity 0.2s ease, transform 0.1s ease;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.rid-btn span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rid-btn-icon {
+  width: 35px;
+  height: 35px;
+  max-width: 50px;
+  max-height: 50px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .rid-btn:focus {

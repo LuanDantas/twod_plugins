@@ -160,6 +160,17 @@ class RedirectID_AD {
 			wp_die(__('Você não tem permissão para acessar esta página.', self::TEXT_DOMAIN));
 		}
 
+		// Handle cache clearing
+		if (isset($_POST['rid_clear_cache']) && check_admin_referer('rid_clear_cache_action', 'rid_clear_cache_nonce')) {
+			$deleted = $this->clear_all_cache();
+			echo '<div class="notice notice-success is-dismissible"><p>';
+			echo esc_html(sprintf(
+				__('Cache limpo com sucesso! %d transients foram removidos.', self::TEXT_DOMAIN),
+				$deleted
+			));
+			echo '</p></div>';
+		}
+
 		echo '<div class="wrap"><h1>' . esc_html__('RedirectID AD', self::TEXT_DOMAIN) . '</h1>';
 		echo '<p>' . esc_html__('Cria cards de apps + URLs internas', self::TEXT_DOMAIN) . ' <code>/go/&lt;token&gt;</code>. ';
 		echo esc_html__('NÃO exibe anúncios — as regras de interstitial ficam no seu script do site.', self::TEXT_DOMAIN) . '</p>';
@@ -167,6 +178,17 @@ class RedirectID_AD {
 		settings_fields(self::OPT);
 		do_settings_sections(self::OPT);
 		submit_button();
+		echo '</form>';
+
+		// Cache clearing section
+		echo '<hr>';
+		echo '<h2>' . esc_html__('Cache', self::TEXT_DOMAIN) . '</h2>';
+		echo '<form method="post" action="">';
+		wp_nonce_field('rid_clear_cache_action', 'rid_clear_cache_nonce');
+		echo '<p>' . esc_html__('Limpe todo o cache do plugin (metadados de apps, contagem de parágrafos, tokens, etc.)', self::TEXT_DOMAIN) . '</p>';
+		echo '<p><button type="submit" name="rid_clear_cache" class="button button-secondary" onclick="return confirm(\'' . esc_js(__('Tem certeza que deseja limpar todo o cache do plugin?', self::TEXT_DOMAIN)) . '\');">';
+		echo esc_html__('Limpar Cache', self::TEXT_DOMAIN);
+		echo '</button></p>';
 		echo '</form></div>';
 	}
 
@@ -197,17 +219,22 @@ class RedirectID_AD {
 			return;
 		}
 
+		$css_file = plugin_dir_path(__FILE__) . 'assets/rid-admin.css';
+		$js_file = plugin_dir_path(__FILE__) . 'assets/rid-admin.js';
+		$css_version = file_exists($css_file) ? filemtime($css_file) : self::VERSION;
+		$js_version = file_exists($js_file) ? filemtime($js_file) : self::VERSION;
+
 		wp_enqueue_style(
 			'rid-admin',
 			plugin_dir_url(__FILE__) . 'assets/rid-admin.css',
 			array(),
-			self::VERSION
+			$css_version
 		);
 		wp_enqueue_script(
 			'rid-admin',
 			plugin_dir_url(__FILE__) . 'assets/rid-admin.js',
 			array(),
-			self::VERSION,
+			$js_version,
 			true
 		);
 	}
@@ -361,11 +388,16 @@ class RedirectID_AD {
 	 * @since 2.0.0
 	 */
 	public function front_assets() {
+		$css_file = plugin_dir_path(__FILE__) . 'assets/rid-front.css';
+		$js_file = plugin_dir_path(__FILE__) . 'assets/rid-front.js';
+		$css_version = file_exists($css_file) ? filemtime($css_file) : self::VERSION;
+		$js_version = file_exists($js_file) ? filemtime($js_file) : self::VERSION;
+
 		wp_enqueue_style(
 			'rid-front',
 			plugin_dir_url(__FILE__) . 'assets/rid-front.css',
 			array(),
-			self::VERSION
+			$css_version
 		);
 
 		// Fallback color from options
@@ -378,7 +410,7 @@ class RedirectID_AD {
 			'rid-front',
 			plugin_dir_url(__FILE__) . 'assets/rid-front.js',
 			array(),
-			self::VERSION,
+			$js_version,
 			true
 		);
 	}
@@ -681,10 +713,20 @@ class RedirectID_AD {
 			</div>
 			<div class="rid-btns">
 				<?php if ($gplayBtn): ?>
-					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($gplayBtn); ?>"><?php echo esc_html__('Baixar no Google Play', self::TEXT_DOMAIN); ?></a>
+					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($gplayBtn); ?>">
+						<svg class="rid-btn-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+							<path d="M3,20.5V3.5C3,2.91 3.34,2.39 3.84,2.15L13.69,12L3.84,21.85C3.34,21.61 3,21.09 3,20.5M16.81,15.12L6.05,21.34L14.54,12.85L16.81,15.12M20.16,10.81C20.5,11.08 20.75,11.5 20.75,12C20.75,12.5 20.53,12.9 20.18,13.18L17.89,14.5L15.39,12L17.89,9.5L20.16,10.81M6.05,2.66L16.81,8.88L14.54,11.15L6.05,2.66Z"/>
+						</svg>
+						<span><?php echo esc_html__('Baixar no Google Play', self::TEXT_DOMAIN); ?></span>
+					</a>
 				<?php endif; ?>
 				<?php if ($iosBtn): ?>
-					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($iosBtn); ?>"><?php echo esc_html__('Baixar na App Store', self::TEXT_DOMAIN); ?></a>
+					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($iosBtn); ?>">
+						<svg class="rid-btn-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+							<path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z"/>
+						</svg>
+						<span><?php echo esc_html__('Baixar na App Store', self::TEXT_DOMAIN); ?></span>
+					</a>
 				<?php endif; ?>
 			</div>
 			<small class="rid-note"><?php echo esc_html__('As informações sobre tamanho, instalações e avaliação podem variar conforme atualizações nas lojas oficiais.', self::TEXT_DOMAIN); ?></small>
@@ -833,6 +875,25 @@ class RedirectID_AD {
 				time()
 			)
 		);
+	}
+
+	/**
+	 * Clear all plugin cache (all transients starting with rid_)
+	 *
+	 * @since 3.0.0
+	 * @return int Number of deleted transients.
+	 */
+	public function clear_all_cache() {
+		global $wpdb;
+		$deleted = $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+				$wpdb->esc_like('_transient_rid_') . '%',
+				$wpdb->esc_like('_transient_timeout_rid_') . '%'
+			)
+		);
+		wp_cache_flush();
+		return $deleted;
 	}
 }
 
