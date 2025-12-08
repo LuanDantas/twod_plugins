@@ -687,7 +687,7 @@ class RedirectID_AD {
 					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($iosBtn); ?>"><?php echo esc_html__('Baixar na App Store', self::TEXT_DOMAIN); ?></a>
 				<?php endif; ?>
 			</div>
-			<p class="rid-note"><?php echo esc_html__('As informações sobre tamanho, instalações e avaliação podem variar conforme atualizações nas lojas oficiais.', self::TEXT_DOMAIN); ?></p>
+			<small class="rid-note"><?php echo esc_html__('As informações sobre tamanho, instalações e avaliação podem variar conforme atualizações nas lojas oficiais.', self::TEXT_DOMAIN); ?></small>
 		</section>
 		<?php
 		return ob_get_clean();
