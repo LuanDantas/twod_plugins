@@ -2,314 +2,848 @@
 /**
  * Plugin Name: RedirectID AD
  * Description: Cria cards de apps (nome/ícone/tamanho/preço/nota) e URLs internas /go/<token> para acionar regras de interstitial do site. NÃO exibe anúncios. Metabox com múltiplos apps e posição (parágrafo) por app.
- * Version: 2.0.0
+ * Version: 3.0.0
  * Author: TwoD
  * License: GPLv2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain: redirectid-ad
+ * Domain Path: /languages
+ * Requires at least: 5.8
+ * Requires PHP: 7.4
+ *
+ * @package RedirectID_AD
  */
 
 if (!defined('ABSPATH')) exit;
 
+/**
+ * Main plugin class
+ *
+ * @since 2.0.0
+ */
 class RedirectID_AD {
-  const OPT = 'rid_settings';
-  const QV  = 'rid_go_token';
-  const PMK = '_rid_apps'; // post meta com a lista de apps
+	const OPT = 'rid_settings';
+	const QV  = 'rid_go_token';
+	const PMK = '_rid_apps';
+	const TEXT_DOMAIN = 'redirectid-ad';
+	const VERSION = '3.0.0';
+	const CACHE_TTL = 24 * HOUR_IN_SECONDS; // 24 hours
+	const META_CACHE_TTL = 24 * HOUR_IN_SECONDS;
 
-  public function __construct(){
-    // Admin
-    add_action('admin_menu', [$this,'menu']);
-    add_action('admin_init', [$this,'register_settings']);
-    add_action('add_meta_boxes', [$this,'metabox']);
-    add_action('admin_enqueue_scripts', [$this,'admin_assets']);
-    add_action('save_post', [$this,'save_apps'], 20, 3);
+	/**
+	 * Singleton instance
+	 *
+	 * @var RedirectID_AD
+	 */
+	private static $instance = null;
 
-    // Front
-    add_action('wp_enqueue_scripts', [$this,'front_assets']);
-    add_filter('the_content', [$this,'inject_cards'], 8);
+	/**
+	 * Get singleton instance
+	 *
+	 * @return RedirectID_AD
+	 */
+	public static function get_instance() {
+		if (null === self::$instance) {
+			self::$instance = new self();
+		}
+		return self::$instance;
+	}
 
-    // Shortcode para teste manual
-    add_shortcode('rid_app_card', [$this,'shortcode_single']);
+	/**
+	 * Constructor
+	 */
+	private function __construct() {
+		$this->init();
+	}
 
-    // /go/<token>
-    add_action('init', [$this,'register_go_endpoint']);
-    add_action('template_redirect', [$this,'handle_go_request']);
+	/**
+	 * Initialize plugin
+	 */
+	private function init() {
+		// Load text domain
+		add_action('plugins_loaded', array($this, 'load_textdomain'));
 
-    register_activation_hook(__FILE__, [$this,'on_activate']);
-    register_deactivation_hook(__FILE__, 'flush_rewrite_rules');
-  }
+		// Admin
+		add_action('admin_menu', array($this, 'menu'));
+		add_action('admin_init', array($this, 'register_settings'));
+		add_action('add_meta_boxes', array($this, 'metabox'));
+		add_action('admin_enqueue_scripts', array($this, 'admin_assets'));
+		add_action('save_post', array($this, 'save_apps'), 20, 3);
 
-  # ===== Admin =====
-  public function menu(){
-    add_options_page('RedirectID AD', 'RedirectID AD', 'manage_options', 'redirectid-ad', [$this,'settings_page']);
-  }
-  public function register_settings(){
-    register_setting(self::OPT, self::OPT);
-    add_settings_section('general','Opções', '__return_false', self::OPT);
+		// Front
+		add_action('wp_enqueue_scripts', array($this, 'front_assets'));
+		add_filter('the_content', array($this, 'inject_cards'), 8);
 
-    add_settings_field('token_ttl','Tempo de vida do token (/go/) em minutos', function(){
-      $o = get_option(self::OPT, []);
-      $v = intval($o['token_ttl'] ?? 10);
-      echo '<input type="number" min="1" step="1" style="width:120px" name="'.self::OPT.'[token_ttl]" value="'.$v.'">';
-    }, self::OPT, 'general');
+		// Shortcode
+		add_shortcode('rid_app_card', array($this, 'shortcode_single'));
 
-    add_settings_field('hold_ms','Espera na /go/ (ms)', function(){
-      $o = get_option(self::OPT, []);
-      $v = intval($o['hold_ms'] ?? 150);
-      echo '<input type="number" min="0" step="50" style="width:120px" name="'.self::OPT.'[hold_ms]" value="'.$v.'">';
-      echo '<p class="description">0 = redireciona imediatamente; 100–300ms ajuda regras de interstitial por navegação interna.</p>';
-    }, self::OPT, 'general');
+		// /go/<token>
+		add_action('init', array($this, 'register_go_endpoint'));
+		add_action('template_redirect', array($this, 'handle_go_request'));
 
-    add_settings_field('primary_color','Cor do botão (fallback)', function(){
-      $o = get_option(self::OPT, []);
-      $v = esc_attr($o['primary_color'] ?? '#3b82f6');
-      echo '<input type="color" name="'.self::OPT.'[primary_color]" value="'.$v.'">';
-      echo '<p class="description">Tentaremos detectar a cor primária do tema automaticamente; esta é usada como fallback.</p>';
-    }, self::OPT, 'general');
-  }
-  public function settings_page(){
-    echo '<div class="wrap"><h1>RedirectID AD</h1><p>Cria cards de apps + URLs internas <code>/go/&lt;token&gt;</code>. NÃO exibe anúncios — as regras de interstitial ficam no seu script do site.</p>';
-    echo '<form method="post" action="options.php">';
-    settings_fields(self::OPT); do_settings_sections(self::OPT); submit_button(); echo '</form></div>';
-  }
+		// Cleanup
+		add_action('wp_scheduled_delete', array($this, 'cleanup_transients'));
 
-  public function metabox(){
-    add_meta_box('rid_apps', 'Apps (RedirectID)', [$this,'metabox_html'], ['post'], 'side', 'high');
-  }
-  public function admin_assets($hook){
-    if (in_array($hook, ['post.php','post-new.php'], true)){
-      wp_enqueue_style('rid-admin', plugin_dir_url(__FILE__).'assets/rid-admin.css', [], '2.0.0');
-      wp_enqueue_script('rid-admin', plugin_dir_url(__FILE__).'assets/rid-admin.js', [], '2.0.0', true);
-    }
-  }
-  private function count_paragraphs($post){
-    $html = wpautop($post->post_content);
-    return substr_count($html, '</p>');
-  }
-  public function metabox_html($post){
-    $apps = get_post_meta($post->ID, self::PMK, true);
-    if (!is_array($apps)) $apps = [];
-    $countP = $this->count_paragraphs($post);
-    wp_nonce_field('rid_apps','rid_apps_nonce');
-    ?>
-    <div id="rid-box" data-paragraphs="<?php echo esc_attr($countP); ?>">
-      <div class="rid-head">
-        <button type="button" class="button button-primary" id="rid-add">+ adicionar app</button>
-        <small>Parágrafos detectados: <?php echo intval($countP); ?></small>
-      </div>
-      <div id="rid-list"></div>
-      <input type="hidden" name="rid_apps_json" id="rid_apps_json" value="<?php echo esc_attr(wp_json_encode($apps)); ?>">
-      <template id="rid-item-tpl">
-        <div class="rid-item" draggable="true">
-          <span class="rid-drag">↕</span>
-          <a class="rid-del" href="#" title="remover">×</a>
-          <p><label>Google Play</label><input type="url" class="rid-gplay" placeholder="https://play.google.com/store/apps/details?id=..."></p>
-          <p><label>Apple Store</label><input type="url" class="rid-appstore" placeholder="https://apps.apple.com/app/id..."></p>
-          <p><label>Inserir</label>
-            <select class="rid-pos"></select>
-          </p>
-        </div>
-      </template>
-    </div>
-    <?php
-  }
-  public function save_apps($post_id, $post, $update){
-    if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) return;
-    if (!isset($_POST['rid_apps_nonce']) || !wp_verify_nonce($_POST['rid_apps_nonce'],'rid_apps')) return;
-    if (!current_user_can('edit_post',$post_id)) return;
+		// Activation/Deactivation
+		register_activation_hook(__FILE__, array($this, 'on_activate'));
+		register_deactivation_hook(__FILE__, 'flush_rewrite_rules');
+	}
 
-    $json = isset($_POST['rid_apps_json']) ? wp_unslash($_POST['rid_apps_json']) : '[]';
-    $arr  = json_decode($json, true);
-    $out  = [];
-    if (is_array($arr)){
-      foreach ($arr as $it){
-        $g = isset($it['gplay']) ? esc_url_raw($it['gplay']) : '';
-        $a = isset($it['appstore']) ? esc_url_raw($it['appstore']) : '';
-        $p = isset($it['pos']) ? intval($it['pos']) : 0;
-        if ($g || $a) $out[] = ['gplay'=>$g,'appstore'=>$a,'pos'=>$p];
-      }
-    }
-    update_post_meta($post_id, self::PMK, $out);
-  }
+	/**
+	 * Load plugin textdomain
+	 *
+	 * @since 3.0.0
+	 */
+	public function load_textdomain() {
+		load_plugin_textdomain(
+			self::TEXT_DOMAIN,
+			false,
+			dirname(plugin_basename(__FILE__)) . '/languages'
+		);
+	}
 
-  # ===== Front =====
-  public function front_assets(){
-    wp_enqueue_style('rid-front', plugin_dir_url(__FILE__).'assets/rid-front.css', [], '2.0.0');
+	# ===== Admin =====
 
-    // cor do tema fallback
-    $o = get_option(self::OPT, []);
-    $primary = function_exists('sanitize_hex_color') ? sanitize_hex_color($o['primary_color'] ?? '#3b82f6') : ($o['primary_color'] ?? '#3b82f6');
-    wp_add_inline_style('rid-front', ":root{--rid-primary: {$primary};}");
+	/**
+	 * Add admin menu
+	 *
+	 * @since 2.0.0
+	 */
+	public function menu() {
+		add_options_page(
+			__('RedirectID AD', self::TEXT_DOMAIN),
+			__('RedirectID AD', self::TEXT_DOMAIN),
+			'manage_options',
+			'redirectid-ad',
+			array($this, 'settings_page')
+		);
+	}
 
-    // pegamos a cor primária real do tema (se existir) e sobrescrevemos
-    wp_enqueue_script('rid-front', plugin_dir_url(__FILE__).'assets/rid-front.js', [], '2.0.0', true);
-  }
+	/**
+	 * Register settings
+	 *
+	 * @since 2.0.0
+	 */
+	public function register_settings() {
+		register_setting(self::OPT, self::OPT);
 
-  // ==== Helpers (lojas) ====
-  private function parse_gplay_id($v){
-    if (!$v) return null;
-    if (preg_match('~^https?://~i',$v)){ $q=[]; parse_str(parse_url($v, PHP_URL_QUERY) ?: '', $q); return $q['id'] ?? null; }
-    return $v;
-  }
-  private function parse_appstore_id($v){
-    if (!$v) return null;
-    if (preg_match('/id(\d+)/', $v, $m)) return $m[1];
-    return preg_match('/^\d+$/',$v) ? $v : null;
-  }
-  private function clean_play_title($name){
-    return preg_replace('/\s+[–-]\s+Apps on Google Play$/i','', $name);
-  }
+		add_settings_section('general', __('Opções', self::TEXT_DOMAIN), '__return_false', self::OPT);
 
-  // Busca nome/ícone/rating/size/price (Play+iOS). Preferimos o nome da Play.
-  private function enrich_meta($gplayUrl, $appstoreUrl){
-    $key = 'rid_meta_'.md5($gplayUrl.'|'.$appstoreUrl);
-    if ($cached = get_transient($key)) return $cached;
-    $out = [];
+		add_settings_field('token_ttl', __('Tempo de vida do token (/go/) em minutos', self::TEXT_DOMAIN), function() {
+			$o = get_option(self::OPT, []);
+			$v = intval($o['token_ttl'] ?? 10);
+			echo '<input type="number" min="1" step="1" style="width:120px" name="' . esc_attr(self::OPT) . '[token_ttl]" value="' . esc_attr($v) . '">';
+		}, self::OPT, 'general');
 
-    // Play
-    if ($gplayUrl){
-      $id = $this->parse_gplay_id($gplayUrl);
-      if ($id){
-        $url = "https://play.google.com/store/apps/details?id={$id}&hl=en&gl=US";
-        $r = wp_remote_get($url, ['timeout'=>8,'headers'=>['User-Agent'=>'Mozilla/5.0']]);
-        if (!is_wp_error($r)){
-          $html = wp_remote_retrieve_body($r);
-          if (preg_match('/property="og:title"\s+content="([^"]+)"/i',$html,$m))
-            $out['name'] = $this->clean_play_title(html_entity_decode($m[1]));
-          if (preg_match('/property="og:image"\s+content="([^"]+)"/i',$html,$m))
-            $out['icon'] = html_entity_decode($m[1]);
-          if (preg_match('/"aggregateRating":\{"@type":"AggregateRating","ratingValue":"([^"]+)"/',$html,$m))
-            $out['rating'] = $m[1];
-          $out['gplay'] = "https://play.google.com/store/apps/details?id={$id}";
-        }
-      }
-    }
-    // iOS
-    if ($appstoreUrl){
-      $id = $this->parse_appstore_id($appstoreUrl);
-      if ($id){
-        $r = wp_remote_get("https://itunes.apple.com/lookup?id={$id}&country=us", ['timeout'=>8]);
-        if (!is_wp_error($r)){
-          $j = json_decode(wp_remote_retrieve_body($r), true);
-          if (!empty($j['results'][0])){
-            $it = $j['results'][0];
-            if (empty($out['name']) && !empty($it['trackName'])) $out['name'] = $it['trackName'];
-            if (empty($out['icon']) && !empty($it['artworkUrl100'])) $out['icon'] = str_replace('100x100bb','512x512bb',$it['artworkUrl100']);
-            if (!empty($it['averageUserRating'])) $out['rating'] = $out['rating'] ?? $it['averageUserRating'];
-            if (!empty($it['fileSizeBytes'])) $out['size'] = round($it['fileSizeBytes']/1048576,1).'MB';
-            if (isset($it['price'])) $out['price'] = ($it['price']>0 ? '$'.$it['price'] : 'Free');
-            if (!empty($it['trackViewUrl'])) $out['appstore'] = $it['trackViewUrl'];
-          }
-        }
-      }
-    }
+		add_settings_field('hold_ms', __('Espera na /go/ (ms)', self::TEXT_DOMAIN), function() {
+			$o = get_option(self::OPT, []);
+			$v = intval($o['hold_ms'] ?? 150);
+			echo '<input type="number" min="0" step="50" style="width:120px" name="' . esc_attr(self::OPT) . '[hold_ms]" value="' . esc_attr($v) . '">';
+			echo '<p class="description">' . esc_html__('0 = redireciona imediatamente; 100–300ms ajuda regras de interstitial por navegação interna.', self::TEXT_DOMAIN) . '</p>';
+		}, self::OPT, 'general');
 
-    set_transient($key, $out, 12 * HOUR_IN_SECONDS);
-    return $out;
-  }
+		add_settings_field('primary_color', __('Cor do botão (fallback)', self::TEXT_DOMAIN), function() {
+			$o = get_option(self::OPT, []);
+			$v = esc_attr($o['primary_color'] ?? '#3b82f6');
+			echo '<input type="color" name="' . esc_attr(self::OPT) . '[primary_color]" value="' . esc_attr($v) . '">';
+			echo '<p class="description">' . esc_html__('Tentaremos detectar a cor primária do tema automaticamente; esta é usada como fallback.', self::TEXT_DOMAIN) . '</p>';
+		}, self::OPT, 'general');
+	}
 
-  private function build_go($url, $name=''){
-    $o = get_option(self::OPT, []);
-    $ttl = max(1, intval($o['token_ttl'] ?? 10));
-    $token = wp_generate_password(20, false, false);
-    $data = ['url'=>esc_url_raw($url), 'name'=>sanitize_text_field($name), 'ts'=>time()];
-    set_transient('rid_'.$token, $data, $ttl * MINUTE_IN_SECONDS);
-    return home_url('/go/'.$token.'/');
-  }
+	/**
+	 * Settings page
+	 *
+	 * @since 2.0.0
+	 */
+	public function settings_page() {
+		if (!current_user_can('manage_options')) {
+			wp_die(__('Você não tem permissão para acessar esta página.', self::TEXT_DOMAIN));
+		}
 
-  // Render do card (1 app)
-  private function render_card($gplayUrl, $appstoreUrl){
-    $m = $this->enrich_meta($gplayUrl, $appstoreUrl);
-    $name = $m['name'] ?? 'Aplicativo';
-    $icon = $m['icon'] ?? '';
-    $rating = '';
-    if (!empty($m['rating'])){
-      $num = floatval(str_replace(',', '.', (string)$m['rating']));
-      if ($num > 0) $rating = number_format($num, 1, ',', '');
-    }
-    $size = $m['size'] ?? '';
-    $price = isset($m['price']) ? $m['price'] : 'Free';
-    $platforms = ($gplayUrl?'Android':'') . (($gplayUrl && $appstoreUrl)?'/':'') . ($appstoreUrl?'iOS':'');
-    $gplayBtn = $gplayUrl ? $this->build_go($gplayUrl, $name) : '';
-    $iosBtn   = $appstoreUrl ? $this->build_go($appstoreUrl, $name) : '';
+		echo '<div class="wrap"><h1>' . esc_html__('RedirectID AD', self::TEXT_DOMAIN) . '</h1>';
+		echo '<p>' . esc_html__('Cria cards de apps + URLs internas', self::TEXT_DOMAIN) . ' <code>/go/&lt;token&gt;</code>. ';
+		echo esc_html__('NÃO exibe anúncios — as regras de interstitial ficam no seu script do site.', self::TEXT_DOMAIN) . '</p>';
+		echo '<form method="post" action="options.php">';
+		settings_fields(self::OPT);
+		do_settings_sections(self::OPT);
+		submit_button();
+		echo '</form></div>';
+	}
 
-    ob_start(); ?>
-    <section class="rid-card">
-      <div class="rid-head">
-        <?php if($icon): ?><img class="rid-icon" src="<?php echo esc_url($icon); ?>" alt="<?php echo esc_attr($name); ?>"><?php endif; ?>
-        <h2 class="rid-title"><?php echo esc_html($name); ?></h2>
-        <?php if($rating): ?><span class="rid-rate">★ <?php echo esc_html($rating); ?></span><?php endif; ?>
-      </div>
-      <div class="rid-grid">
-        <?php if($platforms): ?><div><small>Plataforma</small><strong><?php echo esc_html($platforms); ?></strong></div><?php endif; ?>
-        <?php if($size): ?><div><small>Tamanho</small><strong><?php echo esc_html($size); ?></strong></div><?php endif; ?>
-        <div><small>Preço</small><strong><?php echo esc_html($price); ?></strong></div>
-      </div>
-      <div class="rid-btns">
-        <?php if($gplayBtn): ?><a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($gplayBtn); ?>">Baixar no Google Play</a><?php endif; ?>
-        <?php if($iosBtn):   ?><a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($iosBtn); ?>">Baixar na App Store</a><?php endif; ?>
-      </div>
-      <p class="rid-note">As informações sobre tamanho, instalações e avaliação podem variar conforme atualizações nas lojas oficiais.</p>
-    </section>
-    <?php
-    return ob_get_clean();
-  }
+	/**
+	 * Add metabox
+	 *
+	 * @since 2.0.0
+	 */
+	public function metabox() {
+		if (!current_user_can('edit_posts')) {
+			return;
+		}
+		add_meta_box('rid_apps', __('Apps (RedirectID)', self::TEXT_DOMAIN), array($this, 'metabox_html'), ['post'], 'side', 'high');
+	}
 
-  // Insere vários cards nos parágrafos escolhidos
-  public function inject_cards($content){
-    if (!is_singular('post') || !in_the_loop() || !is_main_query()) return $content;
-    $apps = get_post_meta(get_the_ID(), self::PMK, true);
-    if (!is_array($apps) || empty($apps)) return $content;
+	/**
+	 * Enqueue admin assets
+	 *
+	 * @param string $hook Current admin page hook.
+	 * @since 2.0.0
+	 */
+	public function admin_assets($hook) {
+		if (!in_array($hook, ['post.php', 'post-new.php'], true)) {
+			return;
+		}
 
-    // transforma conteúdo em blocos de parágrafo
-    $closing = '</p>';
-    $parts = explode($closing, $content);
-    // ordenar por posição
-    usort($apps, function($a,$b){ return intval($a['pos'] ?? 0) <=> intval($b['pos'] ?? 0); });
+		if (!current_user_can('edit_posts')) {
+			return;
+		}
 
-    // inserção progressiva (0 = antes de tudo)
-    $bufferBefore = '';
-    foreach ($apps as $app){
-      $g = $app['gplay'] ?? '';
-      $a = $app['appstore'] ?? '';
-      $p = max(0, intval($app['pos'] ?? 0));
-      $card = $this->render_card($g, $a);
-      if ($p === 0){ $bufferBefore .= $card; continue; }
-      // se o texto tiver menos <p> que p, empurra pro final
-      $idx = min($p, count($parts));
-      // reconstruir adicionando card logo após o p escolhido
-      $parts[$idx-1] = $parts[$idx-1] . $closing . $card;
-    }
+		wp_enqueue_style(
+			'rid-admin',
+			plugin_dir_url(__FILE__) . 'assets/rid-admin.css',
+			array(),
+			self::VERSION
+		);
+		wp_enqueue_script(
+			'rid-admin',
+			plugin_dir_url(__FILE__) . 'assets/rid-admin.js',
+			array(),
+			self::VERSION,
+			true
+		);
+	}
 
-    $html = implode($closing, $parts);
-    return $bufferBefore.$html;
-  }
+	/**
+	 * Count paragraphs in post content
+	 *
+	 * @param WP_Post $post Post object.
+	 * @return int Number of paragraphs.
+	 * @since 2.0.0
+	 */
+	private function count_paragraphs($post) {
+		if (!$post || empty($post->post_content)) {
+			return 0;
+		}
 
-  // Shortcode manual (debug)
-  public function shortcode_single($atts){
-    $a = shortcode_atts(['gplay'=>'','appstore'=>''], $atts);
-    return $this->render_card($a['gplay'], $a['appstore']);
-  }
+		// Cache paragraph count
+		$cache_key = 'rid_para_count_' . $post->ID;
+		$cached = get_transient($cache_key);
+		if (false !== $cached) {
+			return intval($cached);
+		}
 
-  # ===== /go/ =====
-  public function register_go_endpoint(){
-    add_rewrite_rule('^go/([A-Za-z0-9\-_]+)/?$', 'index.php?'.self::QV.'=$matches[1]', 'top');
-    add_rewrite_tag('%'.self::QV.'%','([A-Za-z0-9\-_]+)');
-  }
-  public function on_activate(){ $this->register_go_endpoint(); flush_rewrite_rules(); }
+		$html = wpautop($post->post_content);
+		$count = substr_count($html, '</p>');
 
-  public function handle_go_request(){
-    $token = get_query_var(self::QV); if (!$token) return;
-    $opts = get_option(self::OPT, []); $hold_ms = intval($opts['hold_ms'] ?? 150);
-    $data = get_transient('rid_'.$token);
-    if (!$data || empty($data['url'])) { wp_safe_redirect(home_url('/')); exit; }
-    $final = esc_url_raw($data['url']);
-    status_header(200); nocache_headers(); ?>
-<!doctype html><html lang="pt-br"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Redirecionando…</title><meta name="robots" content="noindex,nofollow">
+		set_transient($cache_key, $count, 3600); // Cache for 1 hour
+		return $count;
+	}
+
+	/**
+	 * Metabox HTML
+	 *
+	 * @param WP_Post $post Post object.
+	 * @since 2.0.0
+	 */
+	public function metabox_html($post) {
+		if (!current_user_can('edit_post', $post->ID)) {
+			return;
+		}
+
+		$apps = get_post_meta($post->ID, self::PMK, true);
+		if (!is_array($apps)) {
+			$apps = [];
+		}
+		$countP = $this->count_paragraphs($post);
+		wp_nonce_field('rid_apps', 'rid_apps_nonce');
+		?>
+		<div id="rid-box" data-paragraphs="<?php echo esc_attr($countP); ?>">
+			<div class="rid-head">
+				<button type="button" class="button button-primary" id="rid-add">+ <?php echo esc_html__('adicionar app', self::TEXT_DOMAIN); ?></button>
+				<small><?php echo esc_html__('Parágrafos detectados:', self::TEXT_DOMAIN); ?> <?php echo intval($countP); ?></small>
+			</div>
+			<div id="rid-list"></div>
+			<input type="hidden" name="rid_apps_json" id="rid_apps_json" value="<?php echo esc_attr(wp_json_encode($apps)); ?>">
+			<template id="rid-item-tpl">
+				<div class="rid-item" draggable="true">
+					<span class="rid-drag">↕</span>
+					<a class="rid-del" href="#" title="<?php echo esc_attr__('remover', self::TEXT_DOMAIN); ?>">×</a>
+					<p><label><?php echo esc_html__('Google Play', self::TEXT_DOMAIN); ?></label><input type="url" class="rid-gplay" placeholder="https://play.google.com/store/apps/details?id=..."></p>
+					<p><label><?php echo esc_html__('Apple Store', self::TEXT_DOMAIN); ?></label><input type="url" class="rid-appstore" placeholder="https://apps.apple.com/app/id..."></p>
+					<p><label><?php echo esc_html__('Inserir', self::TEXT_DOMAIN); ?></label>
+						<select class="rid-pos"></select>
+					</p>
+				</div>
+			</template>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Save apps meta
+	 *
+	 * @param int     $post_id Post ID.
+	 * @param WP_Post $post    Post object.
+	 * @param bool    $update  Whether this is an existing post being updated.
+	 * @since 2.0.0
+	 */
+	public function save_apps($post_id, $post, $update) {
+		if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) {
+			return;
+		}
+
+		if (!isset($_POST['rid_apps_nonce']) || !wp_verify_nonce($_POST['rid_apps_nonce'], 'rid_apps')) {
+			return;
+		}
+
+		if (!current_user_can('edit_post', $post_id)) {
+			return;
+		}
+
+		$json = isset($_POST['rid_apps_json']) ? wp_unslash($_POST['rid_apps_json']) : '[]';
+		$arr  = json_decode($json, true);
+		$out  = [];
+
+		if (is_array($arr)) {
+			foreach ($arr as $it) {
+				$g = isset($it['gplay']) ? esc_url_raw($it['gplay']) : '';
+				$a = isset($it['appstore']) ? esc_url_raw($it['appstore']) : '';
+				$p = isset($it['pos']) ? intval($it['pos']) : 0;
+
+				// Validate URLs
+				if ($g && !$this->validate_store_url($g, 'gplay')) {
+					continue;
+				}
+				if ($a && !$this->validate_store_url($a, 'appstore')) {
+					continue;
+				}
+
+				if ($g || $a) {
+					$out[] = ['gplay' => $g, 'appstore' => $a, 'pos' => $p];
+				}
+			}
+		}
+
+		update_post_meta($post_id, self::PMK, $out);
+
+		// Clear paragraph count cache
+		delete_transient('rid_para_count_' . $post_id);
+	}
+
+	/**
+	 * Validate store URL
+	 *
+	 * @param string $url  URL to validate.
+	 * @param string $type Store type (gplay or appstore).
+	 * @return bool True if valid.
+	 * @since 3.0.0
+	 */
+	private function validate_store_url($url, $type) {
+		if (empty($url)) {
+			return false;
+		}
+
+		if ('gplay' === $type) {
+			return (bool) preg_match('#^https?://(play\.google\.com|apps\.android\.com)/store/apps#i', $url);
+		}
+
+		if ('appstore' === $type) {
+			return (bool) preg_match('#^https?://(apps\.apple\.com|itunes\.apple\.com)/#i', $url);
+		}
+
+		return false;
+	}
+
+	# ===== Front =====
+
+	/**
+	 * Enqueue front assets
+	 *
+	 * @since 2.0.0
+	 */
+	public function front_assets() {
+		wp_enqueue_style(
+			'rid-front',
+			plugin_dir_url(__FILE__) . 'assets/rid-front.css',
+			array(),
+			self::VERSION
+		);
+
+		// Fallback color from options
+		$o = get_option(self::OPT, []);
+		$primary = function_exists('sanitize_hex_color') ? sanitize_hex_color($o['primary_color'] ?? '#3b82f6') : ($o['primary_color'] ?? '#3b82f6');
+		wp_add_inline_style('rid-front', ":root{--rid-primary: {$primary};}");
+
+		// Theme color detection script
+		wp_enqueue_script(
+			'rid-front',
+			plugin_dir_url(__FILE__) . 'assets/rid-front.js',
+			array(),
+			self::VERSION,
+			true
+		);
+	}
+
+	# ===== Helpers (Stores) =====
+
+	/**
+	 * Parse Google Play ID from URL
+	 *
+	 * @param string $v URL or ID.
+	 * @return string|null App ID or null.
+	 * @since 2.0.0
+	 */
+	private function parse_gplay_id($v) {
+		if (!$v) {
+			return null;
+		}
+		if (preg_match('~^https?://~i', $v)) {
+			$q = [];
+			parse_str(wp_parse_url($v, PHP_URL_QUERY) ?: '', $q);
+			return isset($q['id']) ? sanitize_text_field($q['id']) : null;
+		}
+		return sanitize_text_field($v);
+	}
+
+	/**
+	 * Parse App Store ID from URL
+	 *
+	 * @param string $v URL or ID.
+	 * @return string|null App ID or null.
+	 * @since 2.0.0
+	 */
+	private function parse_appstore_id($v) {
+		if (!$v) {
+			return null;
+		}
+		if (preg_match('/id(\d+)/', $v, $m)) {
+			return sanitize_text_field($m[1]);
+		}
+		return preg_match('/^\d+$/', $v) ? sanitize_text_field($v) : null;
+	}
+
+	/**
+	 * Clean Play Store title
+	 *
+	 * @param string $name Title to clean.
+	 * @return string Cleaned title.
+	 * @since 2.0.0
+	 */
+	private function clean_play_title($name) {
+		return preg_replace('/\s+[–-]\s+Apps on Google Play$/i', '', $name);
+	}
+
+	/**
+	 * Enrich metadata from stores (with async support)
+	 *
+	 * @param string $gplayUrl    Google Play URL.
+	 * @param string $appstoreUrl App Store URL.
+	 * @return array Metadata array.
+	 * @since 2.0.0
+	 */
+	private function enrich_meta($gplayUrl, $appstoreUrl) {
+		$key = 'rid_meta_' . md5($gplayUrl . '|' . $appstoreUrl);
+		$cached = get_transient($key);
+		if (false !== $cached) {
+			return $cached;
+		}
+
+		$out = [];
+
+		// Schedule async fetch if not in admin
+		if (!is_admin()) {
+			$this->schedule_async_fetch($gplayUrl, $appstoreUrl);
+			// Return empty array, will be populated on next request
+			return $out;
+		}
+
+		// Synchronous fetch in admin
+		$out = $this->fetch_meta_sync($gplayUrl, $appstoreUrl);
+		set_transient($key, $out, self::META_CACHE_TTL);
+		return $out;
+	}
+
+	/**
+	 * Schedule async metadata fetch
+	 *
+	 * @param string $gplayUrl    Google Play URL.
+	 * @param string $appstoreUrl App Store URL.
+	 * @since 3.0.0
+	 */
+	private function schedule_async_fetch($gplayUrl, $appstoreUrl) {
+		// Use WP Cron for async processing
+		$key = 'rid_meta_' . md5($gplayUrl . '|' . $appstoreUrl);
+		if (false === get_transient($key . '_fetching')) {
+			set_transient($key . '_fetching', true, 300); // 5 min lock
+			wp_schedule_single_event(time() + 1, 'rid_fetch_meta', array($gplayUrl, $appstoreUrl));
+		}
+	}
+
+	/**
+	 * Fetch metadata synchronously (public wrapper for cron)
+	 *
+	 * @param string $gplayUrl    Google Play URL.
+	 * @param string $appstoreUrl App Store URL.
+	 * @return array Metadata.
+	 * @since 3.0.0
+	 */
+	public function fetch_meta_sync($gplayUrl, $appstoreUrl) {
+		$out = [];
+
+		// Google Play
+		if ($gplayUrl) {
+			$id = $this->parse_gplay_id($gplayUrl);
+			if ($id) {
+				$url = "https://play.google.com/store/apps/details?id={$id}&hl=en&gl=US";
+				$r = wp_remote_get($url, [
+					'timeout' => 8,
+					'headers' => ['User-Agent' => 'Mozilla/5.0'],
+				]);
+
+				if (!is_wp_error($r)) {
+					$html = wp_remote_retrieve_body($r);
+					$code = wp_remote_retrieve_response_code($r);
+
+					if (200 === $code && $html) {
+						// Validate HTML structure before parsing
+						if (preg_match('/property="og:title"\s+content="([^"]+)"/i', $html, $m)) {
+							$out['name'] = $this->clean_play_title(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+						}
+						if (preg_match('/property="og:image"\s+content="([^"]+)"/i', $html, $m)) {
+							$out['icon'] = esc_url_raw(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+						}
+						if (preg_match('/"aggregateRating":\{"@type":"AggregateRating","ratingValue":"([^"]+)"/', $html, $m)) {
+							$out['rating'] = sanitize_text_field($m[1]);
+						}
+						$out['gplay'] = esc_url_raw("https://play.google.com/store/apps/details?id={$id}");
+					}
+				}
+			}
+		}
+
+		// App Store
+		if ($appstoreUrl) {
+			$id = $this->parse_appstore_id($appstoreUrl);
+			if ($id) {
+				$r = wp_remote_get("https://itunes.apple.com/lookup?id={$id}&country=us", ['timeout' => 8]);
+
+				if (!is_wp_error($r)) {
+					$body = wp_remote_retrieve_body($r);
+					$code = wp_remote_retrieve_response_code($r);
+
+					if (200 === $code && $body) {
+						$j = json_decode($body, true);
+						if (is_array($j) && !empty($j['results'][0])) {
+							$it = $j['results'][0];
+							if (empty($out['name']) && !empty($it['trackName'])) {
+								$out['name'] = sanitize_text_field($it['trackName']);
+							}
+							if (empty($out['icon']) && !empty($it['artworkUrl100'])) {
+								$out['icon'] = esc_url_raw(str_replace('100x100bb', '512x512bb', $it['artworkUrl100']));
+							}
+							if (!empty($it['averageUserRating'])) {
+								$out['rating'] = $out['rating'] ?? floatval($it['averageUserRating']);
+							}
+							if (!empty($it['fileSizeBytes'])) {
+								$out['size'] = round($it['fileSizeBytes'] / 1048576, 1) . 'MB';
+							}
+							if (isset($it['price'])) {
+								$price = floatval($it['price']);
+								$out['price'] = ($price > 0 ? $this->format_price($price) : __('Free', self::TEXT_DOMAIN));
+							}
+							if (!empty($it['trackViewUrl'])) {
+								$out['appstore'] = esc_url_raw($it['trackViewUrl']);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Format price with localization
+	 *
+	 * @param float $price Price value.
+	 * @return string Formatted price.
+	 * @since 3.0.0
+	 */
+	private function format_price($price) {
+		$locale = get_locale();
+		$currency = 'USD';
+
+		// Try to detect currency from locale
+		if (strpos($locale, 'pt_BR') !== false) {
+			$currency = 'BRL';
+		} elseif (strpos($locale, 'es_') !== false) {
+			$currency = 'EUR';
+		}
+
+		if (function_exists('number_format_i18n')) {
+			$formatted = number_format_i18n($price, 2);
+		} else {
+			$formatted = number_format($price, 2, ',', '.');
+		}
+
+		// Simple currency symbol mapping
+		$symbols = [
+			'USD' => '$',
+			'BRL' => 'R$',
+			'EUR' => '€',
+		];
+
+		$symbol = $symbols[$currency] ?? '$';
+		return $symbol . $formatted;
+	}
+
+	/**
+	 * Build /go/ URL with token
+	 *
+	 * @param string $url  Destination URL.
+	 * @param string $name App name.
+	 * @return string /go/ URL.
+	 * @since 2.0.0
+	 */
+	private function build_go($url, $name = '') {
+		$o = get_option(self::OPT, []);
+		$ttl = max(1, intval($o['token_ttl'] ?? 10));
+		$token = wp_generate_password(20, false, false);
+		$data = [
+			'url' => esc_url_raw($url),
+			'name' => sanitize_text_field($name),
+			'ts' => time(),
+		];
+
+		// Rate limiting: check if too many tokens created recently
+		$rate_key = 'rid_rate_' . wp_get_current_user()->ID;
+		$rate_count = get_transient($rate_key) ?: 0;
+		if ($rate_count > 100) {
+			// Too many requests, delay
+			return home_url('/');
+		}
+		set_transient($rate_key, $rate_count + 1, 60); // 1 minute window
+
+		set_transient('rid_' . $token, $data, $ttl * MINUTE_IN_SECONDS);
+		return home_url('/go/' . $token . '/');
+	}
+
+	/**
+	 * Render app card
+	 *
+	 * @param string $gplayUrl    Google Play URL.
+	 * @param string $appstoreUrl App Store URL.
+	 * @return string Card HTML.
+	 * @since 2.0.0
+	 */
+	private function render_card($gplayUrl, $appstoreUrl) {
+		$m = $this->enrich_meta($gplayUrl, $appstoreUrl);
+		$name = $m['name'] ?? __('Aplicativo', self::TEXT_DOMAIN);
+		$icon = $m['icon'] ?? '';
+		$rating = '';
+		if (!empty($m['rating'])) {
+			$num = floatval(str_replace(',', '.', (string) $m['rating']));
+			if ($num > 0) {
+				$rating = number_format_i18n($num, 1);
+			}
+		}
+		$size = $m['size'] ?? '';
+		$price = isset($m['price']) ? $m['price'] : __('Free', self::TEXT_DOMAIN);
+		$platforms = ($gplayUrl ? 'Android' : '') . (($gplayUrl && $appstoreUrl) ? '/' : '') . ($appstoreUrl ? 'iOS' : '');
+		$gplayBtn = $gplayUrl ? $this->build_go($gplayUrl, $name) : '';
+		$iosBtn   = $appstoreUrl ? $this->build_go($appstoreUrl, $name) : '';
+
+		// Fallback icon
+		if (empty($icon)) {
+			$icon = plugin_dir_url(__FILE__) . 'assets/default-app-icon.png';
+		}
+
+		ob_start();
+		?>
+		<section class="rid-card">
+			<div class="rid-head">
+				<?php if ($icon): ?>
+					<img class="rid-icon" src="<?php echo esc_url($icon); ?>" alt="<?php echo esc_attr($name); ?>" loading="lazy" onerror="this.src='<?php echo esc_url(plugin_dir_url(__FILE__) . 'assets/default-app-icon.png'); ?>'">
+				<?php endif; ?>
+				<h2 class="rid-title"><?php echo esc_html($name); ?></h2>
+				<?php if ($rating): ?>
+					<span class="rid-rate">★ <?php echo esc_html($rating); ?></span>
+				<?php endif; ?>
+			</div>
+			<div class="rid-grid">
+				<?php if ($platforms): ?>
+					<div><small><?php echo esc_html__('Plataforma', self::TEXT_DOMAIN); ?></small><strong><?php echo esc_html($platforms); ?></strong></div>
+				<?php endif; ?>
+				<?php if ($size): ?>
+					<div><small><?php echo esc_html__('Tamanho', self::TEXT_DOMAIN); ?></small><strong><?php echo esc_html($size); ?></strong></div>
+				<?php endif; ?>
+				<div><small><?php echo esc_html__('Preço', self::TEXT_DOMAIN); ?></small><strong><?php echo esc_html($price); ?></strong></div>
+			</div>
+			<div class="rid-btns">
+				<?php if ($gplayBtn): ?>
+					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($gplayBtn); ?>"><?php echo esc_html__('Baixar no Google Play', self::TEXT_DOMAIN); ?></a>
+				<?php endif; ?>
+				<?php if ($iosBtn): ?>
+					<a class="rid-btn rid-btn--primary" rel="nofollow" href="<?php echo esc_url($iosBtn); ?>"><?php echo esc_html__('Baixar na App Store', self::TEXT_DOMAIN); ?></a>
+				<?php endif; ?>
+			</div>
+			<p class="rid-note"><?php echo esc_html__('As informações sobre tamanho, instalações e avaliação podem variar conforme atualizações nas lojas oficiais.', self::TEXT_DOMAIN); ?></p>
+		</section>
+		<?php
+		return ob_get_clean();
+	}
+
+	/**
+	 * Inject cards into content
+	 *
+	 * @param string $content Post content.
+	 * @return string Modified content.
+	 * @since 2.0.0
+	 */
+	public function inject_cards($content) {
+		if (!is_singular('post') || !in_the_loop() || !is_main_query()) {
+			return $content;
+		}
+
+		$apps = get_post_meta(get_the_ID(), self::PMK, true);
+		if (!is_array($apps) || empty($apps)) {
+			return $content;
+		}
+
+		// Transform content into paragraph blocks
+		$closing = '</p>';
+		$parts = explode($closing, $content);
+		// Sort by position
+		usort($apps, function($a, $b) {
+			return intval($a['pos'] ?? 0) <=> intval($b['pos'] ?? 0);
+		});
+
+		// Progressive insertion (0 = before everything)
+		$bufferBefore = '';
+		foreach ($apps as $app) {
+			$g = $app['gplay'] ?? '';
+			$a = $app['appstore'] ?? '';
+			$p = max(0, intval($app['pos'] ?? 0));
+			$card = $this->render_card($g, $a);
+			if ($p === 0) {
+				$bufferBefore .= $card;
+				continue;
+			}
+			// If content has fewer <p> than p, push to end
+			$idx = min($p, count($parts));
+			// Rebuild adding card right after chosen p
+			$parts[$idx - 1] = $parts[$idx - 1] . $closing . $card;
+		}
+
+		$html = implode($closing, $parts);
+		return $bufferBefore . $html;
+	}
+
+	/**
+	 * Shortcode handler
+	 *
+	 * @param array $atts Shortcode attributes.
+	 * @return string Card HTML.
+	 * @since 2.0.0
+	 */
+	public function shortcode_single($atts) {
+		$a = shortcode_atts(['gplay' => '', 'appstore' => ''], $atts);
+		return $this->render_card($a['gplay'], $a['appstore']);
+	}
+
+	# ===== /go/ Endpoint =====
+
+	/**
+	 * Register /go/ rewrite endpoint
+	 *
+	 * @since 2.0.0
+	 */
+	public function register_go_endpoint() {
+		add_rewrite_rule('^go/([A-Za-z0-9\-_]+)/?$', 'index.php?' . self::QV . '=$matches[1]', 'top');
+		add_rewrite_tag('%' . self::QV . '%', '([A-Za-z0-9\-_]+)');
+	}
+
+	/**
+	 * Activation hook
+	 *
+	 * @since 2.0.0
+	 */
+	public function on_activate() {
+		$this->register_go_endpoint();
+		flush_rewrite_rules();
+	}
+
+	/**
+	 * Handle /go/ request
+	 *
+	 * @since 2.0.0
+	 */
+	public function handle_go_request() {
+		$token = get_query_var(self::QV);
+		if (!$token) {
+			return;
+		}
+
+		// Validate token format
+		if (!preg_match('/^[A-Za-z0-9\-_]{20}$/', $token)) {
+			wp_safe_redirect(home_url('/'));
+			exit;
+		}
+
+		$opts = get_option(self::OPT, []);
+		$hold_ms = intval($opts['hold_ms'] ?? 150);
+		$data = get_transient('rid_' . $token);
+
+		if (!$data || empty($data['url'])) {
+			wp_safe_redirect(home_url('/'));
+			exit;
+		}
+
+		$final = esc_url_raw($data['url']);
+		status_header(200);
+		nocache_headers();
+		?>
+<!doctype html>
+<html lang="<?php echo esc_attr(get_locale()); ?>">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?php echo esc_html__('Redirecionando…', self::TEXT_DOMAIN); ?></title>
+<meta name="robots" content="noindex,nofollow">
 <script>(function(){var u=<?php echo json_encode($final); ?>,d=<?php echo json_encode($hold_ms); ?>;function go(){location.href=u;} if(d>0) setTimeout(go,d); else go();})();</script>
 <noscript><meta http-equiv="refresh" content="0;url=<?php echo esc_attr($final); ?>"></noscript>
-</head><body></body></html>
-<?php exit; }
+</head>
+<body></body>
+</html>
+		<?php
+		exit;
+	}
+
+	/**
+	 * Cleanup expired transients
+	 *
+	 * @since 3.0.0
+	 */
+	public function cleanup_transients() {
+		global $wpdb;
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d",
+				$wpdb->esc_like('_transient_timeout_rid_') . '%',
+				time()
+			)
+		);
+	}
 }
 
-new RedirectID_AD();
+// Initialize plugin
+RedirectID_AD::get_instance();
+
+// Register cron hook for async fetching
+add_action('rid_fetch_meta', function($gplayUrl, $appstoreUrl) {
+	$instance = RedirectID_AD::get_instance();
+	$key = 'rid_meta_' . md5($gplayUrl . '|' . $appstoreUrl);
+	$meta = $instance->fetch_meta_sync($gplayUrl, $appstoreUrl);
+	set_transient($key, $meta, RedirectID_AD::META_CACHE_TTL);
+	delete_transient($key . '_fetching');
+}, 10, 2);

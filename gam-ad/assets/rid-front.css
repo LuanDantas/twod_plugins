@@ -1,17 +1,166 @@
-:root{
+/**
+ * RedirectID AD - Frontend Styles
+ * 
+ * @package RedirectID_AD
+ * @since 2.0.0
+ */
+
+:root {
   --rid-primary: #3b82f6; /* fallback das opções */
   --rid-theme-primary: var(--wp--preset--color--primary, var(--rid-primary));
-  --rid-border:#e8eaf0; --rid-text:#0f172a; --rid-muted:#64748b; --rid-shadow:0 12px 32px rgba(2,6,23,.08);
+  --rid-border: #e8eaf0;
+  --rid-text: #0f172a;
+  --rid-muted: #64748b;
+  --rid-shadow: 0 12px 32px rgba(2, 6, 23, 0.08);
 }
-.rid-card{background:#fff;border:1px solid var(--rid-border);border-radius:16px;padding:18px;box-shadow:var(--rid-shadow);margin:18px 0}
-.rid-head{display:flex;align-items:center;gap:12px}
-.rid-icon{width:52px;height:52px;border-radius:12px;object-fit:cover}
-.rid-title{margin:0;font-size:20px;font-weight:800;color:var(--rid-text)}
-.rid-rate{margin-left:auto;background:#fff;border:1px solid var(--rid-border);border-radius:999px;padding:4px 10px;font-size:14px;color:#111827}
-.rid-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
-.rid-grid small{display:block;color:var(--rid-muted);font-size:12px}
-.rid-grid strong{font-weight:700;color:var(--rid-text)}
-@media (max-width:700px){ .rid-grid{grid-template-columns:repeat(2,1fr)} }
-.rid-btns{display:grid;grid-template-columns:1fr;gap:10px;margin-top:8px}
-.rid-btn{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:12px 16px;font-weight:700;color:#fff;background:var(--rid-theme-primary)}
-.rid-note{color:var(--rid-muted);font-size:12px;margin-top:10px}
+
+.rid-card {
+  background: #fff;
+  border: 1px solid var(--rid-border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--rid-shadow);
+  margin: 18px 0;
+}
+
+.rid-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rid-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.rid-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--rid-text);
+  flex: 1;
+}
+
+.rid-rate {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid var(--rid-border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 14px;
+  color: #111827;
+  flex-shrink: 0;
+}
+
+.rid-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.rid-grid small {
+  display: block;
+  color: var(--rid-muted);
+  font-size: 12px;
+}
+
+.rid-grid strong {
+  font-weight: 700;
+  color: var(--rid-text);
+}
+
+@media (max-width: 700px) {
+  .rid-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.rid-btns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.rid-btn {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--rid-theme-primary);
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.rid-btn:focus {
+  outline: 2px solid var(--rid-theme-primary);
+  outline-offset: 2px;
+}
+
+.rid-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.rid-btn:active {
+  transform: translateY(0);
+}
+
+.rid-note {
+  color: var(--rid-muted);
+  font-size: 12px;
+  margin-top: 10px;
+  font-style: italic;
+}
+
+/* RTL Support */
+[dir='rtl'] .rid-rate {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+[dir='rtl'] .rid-head {
+  flex-direction: row-reverse;
+}
+
+/* Print Styles */
+@media print {
+  .rid-card {
+    box-shadow: none;
+    border: 1px solid #000;
+    page-break-inside: avoid;
+  }
+
+  .rid-btn {
+    display: none;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .rid-btn {
+    transition: none;
+  }
+
+  .rid-btn:hover {
+    transform: none;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .rid-card {
+    border-width: 2px;
+  }
+
+  .rid-btn {
+    border: 2px solid currentColor;
+  }
+}
