@@ -1,0 +1,17 @@
+:root{
+  --rid-primary: #3b82f6; /* fallback das opções */
+  --rid-theme-primary: var(--wp--preset--color--primary, var(--rid-primary));
+  --rid-border:#e8eaf0; --rid-text:#0f172a; --rid-muted:#64748b; --rid-shadow:0 12px 32px rgba(2,6,23,.08);
+}
+.rid-card{background:#fff;border:1px solid var(--rid-border);border-radius:16px;padding:18px;box-shadow:var(--rid-shadow);margin:18px 0}
+.rid-head{display:flex;align-items:center;gap:12px}
+.rid-icon{width:52px;height:52px;border-radius:12px;object-fit:cover}
+.rid-title{margin:0;font-size:20px;font-weight:800;color:var(--rid-text)}
+.rid-rate{margin-left:auto;background:#fff;border:1px solid var(--rid-border);border-radius:999px;padding:4px 10px;font-size:14px;color:#111827}
+.rid-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.rid-grid small{display:block;color:var(--rid-muted);font-size:12px}
+.rid-grid strong{font-weight:700;color:var(--rid-text)}
+@media (max-width:700px){ .rid-grid{grid-template-columns:repeat(2,1fr)} }
+.rid-btns{display:grid;grid-template-columns:1fr;gap:10px;margin-top:8px}
+.rid-btn{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:12px 16px;font-weight:700;color:#fff;background:var(--rid-theme-primary)}
+.rid-note{color:var(--rid-muted);font-size:12px;margin-top:10px}

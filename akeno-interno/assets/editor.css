@@ -1,0 +1,7 @@
+.akeno-btn-config{padding:10px;border:1px solid #e5e7eb;border-radius:14px;margin-bottom:14px;background:#fff}
+.akeno-previewline{margin:4px 0;color:#111827;font-weight:600}
+.akeno-previewurl{margin-top:-4px;color:#6b7280;font-size:12px}
+.akeno-suggest-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.akeno-suggest-item{padding:10px 12px;border:1px dashed #cbd5e1;border-radius:12px;background:#f8fafc}
+.is-editor-styles-wrapper .akeno-note, .editor-styles-wrapper .akeno-note { display:none !important; }
+.akeno-preview{margin-top:12px;padding:10px;border-top:1px dashed #e5e7eb}

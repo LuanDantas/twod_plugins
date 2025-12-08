@@ -1,0 +1,8 @@
+#rid-box .rid-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+#rid-list{display:grid;gap:8px}
+.rid-item{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;position:relative}
+.rid-item .rid-drag{cursor:grab;position:absolute;left:8px;top:8px}
+.rid-item .rid-del{position:absolute;right:8px;top:6px;text-decoration:none;font-weight:bold;font-size:16px}
+.rid-item p{margin:8px 0 0 0}
+.rid-item label{display:block;font-size:12px;color:#555}
+.rid-item input,.rid-item select{width:100%}

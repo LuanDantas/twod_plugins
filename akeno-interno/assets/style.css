@@ -1,0 +1,36 @@
+:root{
+  --ak-primary:#1d4ed8;
+  --ak-primary-600:#1e40af;
+  --ak-ink:#0f172a;
+  --ak-muted:#64748b;
+  --ak-bg:#ffffff;
+}
+.ak-sans{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, sans-serif; }
+.akeno-wrapper{display:flex;flex-direction:column;gap:12px;max-width:980px;margin-left:auto;margin-right:auto;padding:0 12px}
+@media (min-width:768px){.akeno-wrapper{gap:14px;padding:0}}
+
+.akeno-button{display:block;text-decoration:none;border:1px solid rgba(29,78,216,.35);border-radius:16px;padding:14px 14px;background:#fff;color:var(--ak-primary);box-shadow:0 6px 18px rgba(37,99,235,.08);transition:transform .06s ease, background .15s ease, color .15s ease, box-shadow .15s ease;touch-action:manipulation}
+.akeno-button:active{transform:scale(.99)}
+.akeno-button:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(37,99,235,.15)}
+.akeno-inner{display:flex;align-items:center;justify-content:space-between;font-weight:800;letter-spacing:.1px}
+.akeno-icon{margin-right:10px;margin-left:2px;font-size:1.1em}
+.akeno-text{display:flex;align-items:center;gap:10px}
+.akeno-caret{opacity:.75}
+
+.akeno-note{max-width:920px;margin:10px auto 0;color:#94a3b8;font-style:italic;text-align:center;font-size:.72rem;line-height:1.1}
+
+.variant-inverse .akeno-button{background:#fff;color:var(--ak-primary)}
+.variant-outline .akeno-button{background:transparent;color:var(--ak-primary);border-color:var(--ak-primary)}
+.variant-primary .akeno-button{background:var(--ak-primary);color:#fff;border-color:var(--ak-primary)} 
+.variant-primary .akeno-button:hover{background:var(--ak-primary-600);border-color:var(--ak-primary-600)}
+.variant-secondary .akeno-button{background:#111827;color:#fff;border-color:#111827}
+.variant-cta .akeno-button{background:#16a34a;color:#fff;border-color:#16a34a;box-shadow:0 10px 26px rgba(22,163,74,.25)}
+.variant-pill .akeno-button{border-radius:999px;background:#fff;color:var(--ak-ink);border-color:#cbd5e1}
+.variant-gradient .akeno-button{background:linear-gradient(90deg,#1d4ed8,#8b5cf6);color:#fff;border-color:transparent;box-shadow:0 12px 28px rgba(29,78,216,.24)}
+.variant-shadow .akeno-button{background:#fff;color:var(--ak-ink);border-color:#e5e7eb;box-shadow:0 12px 30px rgba(0,0,0,.10)}
+.variant-soft .akeno-button{background:#eff6ff;color:var(--ak-primary);border-color:#dbeafe}
+.variant-flat .akeno-button{border-color:transparent;background:#e5e7eb;color:var(--ak-ink)}
+.variant-accent .akeno-button{background:#8b5cf6;color:#fff;border-color:#8b5cf6}
+.variant-horizontal .akeno-wrapper{flex-direction:row;flex-wrap:wrap;gap:10px}
+.variant-horizontal .akeno-button{flex:1 1 30%}
+.variant-large .akeno-button{padding:18px 18px;font-size:1.08rem}
