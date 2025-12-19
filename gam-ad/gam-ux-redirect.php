@@ -79,6 +79,8 @@ class RedirectID_AD {
 
 		// /go/<token>
 		add_action('init', array($this, 'register_go_endpoint'));
+		add_action('init', array($this, 'early_intercept_go_request'), 1);
+		add_action('parse_request', array($this, 'intercept_go_request'), 1);
 		add_action('template_redirect', array($this, 'handle_go_request'));
 
 		// Cleanup
@@ -630,6 +632,41 @@ class RedirectID_AD {
 	}
 
 	/**
+	 * Get current site URL (including subdomain)
+	 *
+	 * Detects the current site URL based on the request, including subdomains.
+	 * Falls back to home_url() if detection is not possible.
+	 *
+	 * @param string $path Optional path to append.
+	 * @return string Current site URL with optional path.
+	 * @since 3.0.0
+	 */
+	private function get_current_site_url($path = '') {
+		// Detect current protocol
+		$protocol = is_ssl() ? 'https://' : 'http://';
+		
+		// Detect current host from request
+		$host = '';
+		if (isset($_SERVER['HTTP_HOST']) && !empty($_SERVER['HTTP_HOST'])) {
+			$host = sanitize_text_field($_SERVER['HTTP_HOST']);
+		} else {
+			// Fallback to home_url if HTTP_HOST is not available
+			return home_url($path);
+		}
+		
+		// Build URL
+		$url = $protocol . $host;
+		
+		// Add path if provided
+		if (!empty($path)) {
+			$path = '/' . ltrim($path, '/');
+			$url .= $path;
+		}
+		
+		return esc_url_raw($url);
+	}
+
+	/**
 	 * Build /go/ URL with token
 	 *
 	 * @param string $url  Destination URL.
@@ -652,12 +689,12 @@ class RedirectID_AD {
 		$rate_count = get_transient($rate_key) ?: 0;
 		if ($rate_count > 100) {
 			// Too many requests, delay
-			return home_url('/');
+			return $this->get_current_site_url('/');
 		}
 		set_transient($rate_key, $rate_count + 1, 60); // 1 minute window
 
 		set_transient('rid_' . $token, $data, $ttl * MINUTE_IN_SECONDS);
-		return home_url('/go/' . $token . '/');
+		return $this->get_current_site_url('/go/' . $token . '/');
 	}
 
 	/**
@@ -796,6 +833,61 @@ class RedirectID_AD {
 	# ===== /go/ Endpoint =====
 
 	/**
+	 * Early intercept /go/ request on init hook
+	 * Handles cases where rewrite rules don't work (e.g., subdomains)
+	 *
+	 * @since 3.0.0
+	 */
+	public function early_intercept_go_request() {
+		if (!isset($_SERVER['REQUEST_URI'])) {
+			return;
+		}
+
+		$request_uri = sanitize_text_field($_SERVER['REQUEST_URI']);
+		// Remove query string if present
+		$request_uri = strtok($request_uri, '?');
+		
+		// Check if this is a /go/ request
+		if (preg_match('#/go/([A-Za-z0-9\-_]+)/?#', $request_uri, $matches)) {
+			$token = $matches[1];
+			
+			// Validate token format
+			if (preg_match('/^[A-Za-z0-9\-_]{20}$/', $token)) {
+				// Process directly without waiting for rewrite rules
+				$this->process_go_request($token);
+				exit;
+			}
+		}
+	}
+
+	/**
+	 * Intercept /go/ request early (before rewrite rules)
+	 *
+	 * @param WP $wp WordPress environment instance.
+	 * @since 3.0.0
+	 */
+	public function intercept_go_request($wp) {
+		if (!isset($_SERVER['REQUEST_URI'])) {
+			return;
+		}
+
+		$request_uri = sanitize_text_field($_SERVER['REQUEST_URI']);
+		// Remove query string if present
+		$request_uri = strtok($request_uri, '?');
+		
+		// Check if this is a /go/ request
+		if (preg_match('#/go/([A-Za-z0-9\-_]+)/?#', $request_uri, $matches)) {
+			$token = $matches[1];
+			
+			// Validate token format
+			if (preg_match('/^[A-Za-z0-9\-_]{20}$/', $token)) {
+				// Set query var manually so handle_go_request can process it
+				$wp->query_vars[self::QV] = $token;
+			}
+		}
+	}
+
+	/**
 	 * Register /go/ rewrite endpoint
 	 *
 	 * @since 2.0.0
@@ -821,14 +913,38 @@ class RedirectID_AD {
 	 * @since 2.0.0
 	 */
 	public function handle_go_request() {
+		// Get token from query var (works with rewrite rules)
 		$token = get_query_var(self::QV);
+		
+		// If not found via query var, try to extract from request URI directly
+		// This handles cases where rewrite rules don't work (e.g., subdomains)
+		if (!$token && isset($_SERVER['REQUEST_URI'])) {
+			$request_uri = sanitize_text_field($_SERVER['REQUEST_URI']);
+			// Remove query string if present
+			$request_uri = strtok($request_uri, '?');
+			// Match /go/token/ pattern
+			if (preg_match('#/go/([A-Za-z0-9\-_]+)/?#', $request_uri, $matches)) {
+				$token = $matches[1];
+			}
+		}
+		
 		if (!$token) {
 			return;
 		}
 
+		$this->process_go_request($token);
+	}
+
+	/**
+	 * Process /go/ request with token
+	 *
+	 * @param string $token Token to process.
+	 * @since 3.0.0
+	 */
+	private function process_go_request($token) {
 		// Validate token format
 		if (!preg_match('/^[A-Za-z0-9\-_]{20}$/', $token)) {
-			wp_safe_redirect(home_url('/'));
+			wp_safe_redirect($this->get_current_site_url('/'));
 			exit;
 		}
 
@@ -837,7 +953,7 @@ class RedirectID_AD {
 		$data = get_transient('rid_' . $token);
 
 		if (!$data || empty($data['url'])) {
-			wp_safe_redirect(home_url('/'));
+			wp_safe_redirect($this->get_current_site_url('/'));
 			exit;
 		}
 
