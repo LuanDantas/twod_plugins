@@ -1186,6 +1186,7 @@ add_action('wp', function () {
 
 add_action('translatex_purge_cache', function () {
     TranslateX_Cache::purge_without_fingerprint();
+    TranslateX_Cache::purge_unused_entries();
 });
 
 /* ============================================================

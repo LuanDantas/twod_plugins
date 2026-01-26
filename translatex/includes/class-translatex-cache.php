@@ -337,6 +337,40 @@ class TranslateX_Cache {
         return count($ids);
     }
 
+    /**
+     * Remove cache entries that have not been accessed within the specified time.
+     *
+     * @param int $max_age_seconds Maximum age in seconds since last access (default: 2 days).
+     * @return int Number of entries removed.
+     */
+    public static function purge_unused_entries($max_age_seconds = self::MAX_AGE_SECONDS) {
+        global $wpdb;
+        $table = self::table_name();
+        $threshold = current_time('timestamp') - $max_age_seconds;
+
+        $ids = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT id FROM {$table} WHERE last_accessed < %d",
+                $threshold
+            )
+        );
+
+        if (empty($ids)) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$table} WHERE id IN ({$placeholders})",
+                $ids
+            )
+        );
+
+        self::flush_object_cache();
+        return count($ids);
+    }
+
     public static function start_of_today($timestamp = null) {
         $timestamp = $timestamp ?: current_time('timestamp');
         return strtotime('today', $timestamp);
