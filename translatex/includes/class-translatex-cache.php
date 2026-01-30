@@ -90,9 +90,117 @@ class TranslateX_Cache {
             // Others
             'srsltid',
             'ref',
+            'tp',
+            'src',
         );
 
-        return apply_filters('translatex_ignored_query_params', $defaults);
+        // Merge with custom parameters from database
+        $custom_params = self::get_custom_ignored_params();
+        $all_params = array_merge($defaults, $custom_params);
+        
+        // Remove duplicates and re-index
+        $all_params = array_values(array_unique($all_params));
+
+        return apply_filters('translatex_ignored_query_params', $all_params);
+    }
+
+    /**
+     * Returns list of custom ignored query parameters saved in database.
+     *
+     * @return array List of custom parameter names.
+     */
+    public static function get_custom_ignored_params() {
+        $custom = get_option('translatex_custom_ignored_params', array());
+        if (!is_array($custom)) {
+            return array();
+        }
+        // Sanitize and filter empty values
+        $custom = array_filter(array_map('sanitize_text_field', $custom));
+        return array_values($custom);
+    }
+
+    /**
+     * Saves custom ignored query parameters to database.
+     *
+     * @param array $params Array of parameter names to save.
+     * @return bool True on success, false on failure.
+     */
+    public static function save_custom_ignored_params($params) {
+        if (!is_array($params)) {
+            return false;
+        }
+        // Sanitize all parameters
+        $sanitized = array_filter(array_map('sanitize_text_field', $params));
+        // Remove duplicates
+        $sanitized = array_values(array_unique($sanitized));
+        return update_option('translatex_custom_ignored_params', $sanitized);
+    }
+
+    /**
+     * Adds a single custom ignored query parameter.
+     *
+     * @param string $param Parameter name to add.
+     * @return bool True if added, false if already exists or invalid.
+     */
+    public static function add_custom_ignored_param($param) {
+        if (!is_string($param) || empty($param)) {
+            return false;
+        }
+        
+        // Validate parameter name format (alphanumeric, underscore, hyphen)
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $param)) {
+            return false;
+        }
+        
+        $sanitized = sanitize_text_field($param);
+        $custom = self::get_custom_ignored_params();
+        
+        // Check if already exists in custom params
+        if (in_array($sanitized, $custom, true)) {
+            return false;
+        }
+        
+        // Check if already exists in fixed params
+        $fixed = array(
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            'utm_id', 'utm_source_platform', 'utm_creative_format',
+            'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_source',
+            'gclid', 'gclsrc', 'dclid', '_ga', '_gid', '_gl',
+            'msclkid', 'twclid', 'li_fat_id',
+            '__hstc', '__hssc', '__hsfp',
+            'mc_cid', 'mc_eid', 'mkt_tok',
+            'srsltid', 'ref', 'tp', 'src',
+        );
+        if (in_array($sanitized, $fixed, true)) {
+            return false;
+        }
+        
+        $custom[] = $sanitized;
+        return self::save_custom_ignored_params($custom);
+    }
+
+    /**
+     * Removes a custom ignored query parameter.
+     *
+     * @param string $param Parameter name to remove.
+     * @return bool True if removed, false if not found.
+     */
+    public static function remove_custom_ignored_param($param) {
+        if (!is_string($param) || empty($param)) {
+            return false;
+        }
+        
+        $sanitized = sanitize_text_field($param);
+        $custom = self::get_custom_ignored_params();
+        
+        $key = array_search($sanitized, $custom, true);
+        if ($key === false) {
+            return false;
+        }
+        
+        unset($custom[$key]);
+        $custom = array_values($custom);
+        return self::save_custom_ignored_params($custom);
     }
 
     /**

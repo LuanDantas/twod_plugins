@@ -1359,6 +1359,32 @@ function translatex_render_cache_page() {
                     add_settings_error($message_slug, 'translatex_cache_entry_removed', 'Entrada específica removida.', 'updated');
                 }
                 break;
+            case 'add_param':
+                $param = isset($_POST['translatex_param_name']) ? trim(wp_unslash($_POST['translatex_param_name'])) : '';
+                if (empty($param)) {
+                    add_settings_error($message_slug, 'translatex_param_empty', 'Informe o nome do parâmetro.', 'error');
+                } else {
+                    $result = TranslateX_Cache::add_custom_ignored_param($param);
+                    if ($result) {
+                        add_settings_error($message_slug, 'translatex_param_added', sprintf('Parâmetro "%s" adicionado com sucesso.', esc_html($param)), 'updated');
+                    } else {
+                        add_settings_error($message_slug, 'translatex_param_add_failed', sprintf('Não foi possível adicionar o parâmetro "%s". Verifique se o nome é válido e não está duplicado.', esc_html($param)), 'error');
+                    }
+                }
+                break;
+            case 'remove_param':
+                $param = isset($_POST['translatex_param_name']) ? trim(wp_unslash($_POST['translatex_param_name'])) : '';
+                if (empty($param)) {
+                    add_settings_error($message_slug, 'translatex_param_empty', 'Informe o nome do parâmetro.', 'error');
+                } else {
+                    $result = TranslateX_Cache::remove_custom_ignored_param($param);
+                    if ($result) {
+                        add_settings_error($message_slug, 'translatex_param_removed', sprintf('Parâmetro "%s" removido com sucesso.', esc_html($param)), 'updated');
+                    } else {
+                        add_settings_error($message_slug, 'translatex_param_remove_failed', sprintf('Não foi possível remover o parâmetro "%s". Verifique se ele existe e é customizado.', esc_html($param)), 'error');
+                    }
+                }
+                break;
         }
     }
 
@@ -1488,6 +1514,85 @@ function translatex_render_cache_page() {
                 <?php endif; ?>
             </tbody>
         </table>
+
+        <h2 style="margin-top:32px;">Parâmetros Ignorados no Cache</h2>
+        <p>Parâmetros de query string que são ignorados ao normalizar URLs para cache. URLs com diferentes valores desses parâmetros serão tratadas como a mesma URL para fins de cache.</p>
+
+        <h3>Adicionar Novo Parâmetro</h3>
+        <form method="post" style="max-width:640px;margin-bottom:24px;">
+            <?php wp_nonce_field('translatex_cache_action', 'translatex_cache_nonce'); ?>
+            <input type="hidden" name="translatex_cache_action" value="add_param">
+            <p>
+                <label for="translatex_param_name">Nome do parâmetro:</label><br>
+                <input type="text" id="translatex_param_name" name="translatex_param_name" class="regular-text" placeholder="ex: tracking_id" pattern="[a-zA-Z0-9_-]+" required />
+                <button type="submit" class="button button-primary" style="margin-left:8px;">Adicionar</button>
+            </p>
+            <p class="description">
+                O nome do parâmetro deve conter apenas letras, números, underscores (_) e hífens (-). Parâmetros já existentes (fixos ou customizados) não podem ser adicionados novamente.
+            </p>
+        </form>
+
+        <h3>Lista de Parâmetros Ignorados</h3>
+        <?php
+        $fixed_params = array(
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+            'utm_id', 'utm_source_platform', 'utm_creative_format',
+            'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_source',
+            'gclid', 'gclsrc', 'dclid', '_ga', '_gid', '_gl',
+            'msclkid', 'twclid', 'li_fat_id',
+            '__hstc', '__hssc', '__hsfp',
+            'mc_cid', 'mc_eid', 'mkt_tok',
+            'srsltid', 'ref', 'tp', 'src',
+        );
+        $custom_params = TranslateX_Cache::get_custom_ignored_params();
+        ?>
+        <table class="widefat striped" style="max-width: 640px;">
+            <thead>
+                <tr>
+                    <th style="width:50%;">Parâmetro</th>
+                    <th style="width:30%;">Tipo</th>
+                    <th style="width:20%;">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (!empty($fixed_params)) : ?>
+                    <?php foreach ($fixed_params as $param) : ?>
+                        <tr>
+                            <td><code><?php echo esc_html($param); ?></code></td>
+                            <td><span class="dashicons dashicons-lock" style="color:#666;font-size:16px;vertical-align:middle;"></span> Fixo</td>
+                            <td>&mdash;</td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <?php if (!empty($custom_params)) : ?>
+                    <?php foreach ($custom_params as $param) : ?>
+                        <tr>
+                            <td><code><?php echo esc_html($param); ?></code></td>
+                            <td><span class="dashicons dashicons-admin-settings" style="color:#2271b1;font-size:16px;vertical-align:middle;"></span> Customizado</td>
+                            <td>
+                                <form method="post" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja remover o parâmetro \'<?php echo esc_js($param); ?>\'?');">
+                                    <?php wp_nonce_field('translatex_cache_action', 'translatex_cache_nonce'); ?>
+                                    <input type="hidden" name="translatex_cache_action" value="remove_param">
+                                    <input type="hidden" name="translatex_param_name" value="<?php echo esc_attr($param); ?>">
+                                    <button type="submit" class="button button-small">Remover</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <?php if (empty($fixed_params) && empty($custom_params)) : ?>
+                    <tr>
+                        <td colspan="3">Nenhum parâmetro configurado.</td>
+                    </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+        <?php if (!empty($fixed_params) || !empty($custom_params)) : ?>
+            <p class="description" style="margin-top:12px;">
+                <strong>Total:</strong> <?php echo count($fixed_params) + count($custom_params); ?> parâmetro(s) ignorado(s) 
+                (<?php echo count($fixed_params); ?> fixo(s), <?php echo count($custom_params); ?> customizado(s)).
+            </p>
+        <?php endif; ?>
     </div>
     <?php
 }
