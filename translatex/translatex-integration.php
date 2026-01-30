@@ -2,8 +2,8 @@
 /**
  * Plugin Name: TranslateX Integration
  * Description: Tradução server-side com TranslateX + cache, URLs por idioma com exceção do idioma original do WordPress: /{lang} para todos exceto o idioma padrão (sem prefixo). Mantém idioma em toda a navegação.
- * Version: 2.8
- * Author: Seu Nome
+ * Version: 3.0
+ * Author: Double Edge
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
